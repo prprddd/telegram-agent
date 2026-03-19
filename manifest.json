@@ -1,0 +1,33 @@
+{
+  "name": "חייגן קולי",
+  "short_name": "חייגן",
+  "description": "חיוג בפקודה קולית בעברית",
+  "start_url": "./index.html?autostart=1",
+  "display": "standalone",
+  "background_color": "#0d0d14",
+  "theme_color": "#0d0d14",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "חייג עכשיו",
+      "short_name": "חייג",
+      "description": "פתח ישירות למצב האזנה",
+      "url": "./index.html?autostart=1",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

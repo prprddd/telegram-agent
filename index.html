@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d0d14">
+<title>חייגן קולי</title>
+<link rel="manifest" href="manifest.json">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;700;900&display=swap');
+
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+
+:root{
+  --bg:#0d0d14;
+  --card:#16161f;
+  --border:#252535;
+  --accent:#63b3ff;
+  --green:#3ddc84;
+  --red:#ff6b6b;
+  --text:#eeeef5;
+  --muted:#55556a;
+}
+
+html,body{
+  height:100%;
+  width:100%;
+  overflow:hidden;
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Heebo',sans-serif;
+  direction:rtl;
+  user-select:none;
+}
+
+/* ── SCREEN MANAGER ── */
+.screen{
+  position:absolute;inset:0;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  padding:24px;
+  transition:opacity .3s, transform .3s;
+}
+.screen.hidden{opacity:0;pointer-events:none;transform:scale(.96)}
+
+/* ── MAIN LISTEN SCREEN ── */
+#main{gap:0}
+
+.status-bar{
+  position:absolute;top:0;left:0;right:0;
+  padding:14px 20px 10px;
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:12px;color:var(--muted);
+}
+
+.app-name{font-weight:700;letter-spacing:2px;font-size:11px;color:var(--muted)}
+
+.settings-btn{
+  background:none;border:none;cursor:pointer;
+  font-size:22px;color:var(--muted);padding:4px;
+  transition:color .2s;
+}
+.settings-btn:active{color:var(--text)}
+
+/* Big mic */
+.mic-area{
+  display:flex;flex-direction:column;
+  align-items:center;gap:32px;
+  flex:1;justify-content:center;
+}
+
+.mic-outer{
+  position:relative;
+  width:200px;height:200px;
+}
+
+.ring{
+  position:absolute;inset:0;
+  border-radius:50%;
+  border:2px solid var(--accent);
+  opacity:0;transform:scale(1);
+}
+
+.listening .ring:nth-child(1){animation:pulse 1.8s ease-out .0s infinite}
+.listening .ring:nth-child(2){animation:pulse 1.8s ease-out .5s infinite}
+.listening .ring:nth-child(3){animation:pulse 1.8s ease-out 1.0s infinite}
+
+@keyframes pulse{
+  0%{opacity:.7;transform:scale(1)}
+  100%{opacity:0;transform:scale(1.9)}
+}
+
+.mic-btn{
+  position:absolute;inset:0;
+  border-radius:50%;
+  border:none;cursor:pointer;
+  background:var(--card);
+  border:1.5px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  transition:background .2s, transform .12s;
+  outline:none;
+}
+
+.mic-btn:active{transform:scale(.93)}
+.listening .mic-btn{background:#0d1a2e;border-color:var(--accent)}
+
+.mic-icon{
+  width:72px;height:72px;
+  fill:var(--muted);
+  transition:fill .2s;
+}
+.listening .mic-icon{fill:var(--accent)}
+
+.mic-label{
+  font-size:16px;font-weight:300;
+  color:var(--muted);
+  letter-spacing:.5px;
+  height:22px;
+  transition:color .2s;
+}
+.listening .mic-label{color:var(--accent)}
+
+/* Heard text */
+.heard-box{
+  width:100%;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:18px;
+  padding:18px 22px;
+  min-height:64px;
+  display:flex;align-items:center;
+  gap:10px;
+}
+
+.heard-dot{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--muted);flex-shrink:0;
+  transition:background .2s;
+}
+.active-dot{background:var(--green);animation:blink 1s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+.heard-text{
+  font-size:20px;font-weight:700;
+  color:var(--muted);
+  transition:color .2s;
+  flex:1;
+}
+.heard-text.active{color:var(--text)}
+
+/* ── MATCH SCREEN ── */
+#match{gap:28px}
+
+.match-avatar{
+  width:110px;height:110px;border-radius:50%;
+  background:linear-gradient(135deg,#1a3a6e,#2a5aa8);
+  border:3px solid var(--accent);
+  display:flex;align-items:center;justify-content:center;
+  font-size:46px;font-weight:900;color:white;
+}
+
+.match-name{
+  font-size:34px;font-weight:900;
+  text-align:center;line-height:1.1;
+}
+
+.match-number{
+  font-size:18px;color:var(--muted);
+  direction:ltr;letter-spacing:1px;
+}
+
+.big-call-btn{
+  width:90px;height:90px;border-radius:50%;
+  background:var(--green);border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 40px rgba(61,220,132,.4);
+  transition:transform .15s, box-shadow .2s;
+}
+.big-call-btn:active{transform:scale(.92)}
+.big-call-btn svg{width:38px;height:38px;fill:white}
+
+.cancel-hint{
+  font-size:13px;color:var(--muted);
+  margin-top:8px;letter-spacing:.3px;
+}
+
+/* ── CONTACTS SCREEN ── */
+#contacts{
+  justify-content:flex-start;
+  padding-top:0;overflow:hidden;
+}
+
+.contacts-header{
+  width:100%;display:flex;align-items:center;
+  padding:14px 20px;gap:12px;
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+
+.back-btn{
+  background:none;border:none;cursor:pointer;
+  font-size:22px;color:var(--muted);
+  transition:color .2s;padding:4px;
+}
+.back-btn:active{color:var(--text)}
+
+.contacts-title{font-size:18px;font-weight:700;flex:1}
+
+.add-btn-top{
+  background:var(--accent);border:none;
+  border-radius:8px;padding:7px 14px;
+  font-size:13px;font-weight:700;color:#0d0d14;
+  cursor:pointer;font-family:'Heebo',sans-serif;
+}
+
+.contacts-scroll{
+  width:100%;flex:1;overflow-y:auto;
+  padding:12px 16px;
+}
+
+.contact-item{
+  display:flex;align-items:center;gap:14px;
+  padding:14px 12px;border-radius:14px;
+  border:1px solid transparent;
+  transition:background .15s;cursor:pointer;
+}
+.contact-item:active{background:var(--card);border-color:var(--border)}
+
+.c-avatar{
+  width:46px;height:46px;border-radius:50%;
+  background:var(--card);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;font-weight:900;color:var(--accent);flex-shrink:0;
+}
+
+.c-info{flex:1}
+.c-name{font-size:16px;font-weight:700}
+.c-alias{font-size:12px;color:var(--muted)}
+.c-num{font-size:13px;color:var(--muted);direction:ltr;text-align:right}
+
+.delete-btn{
+  background:none;border:none;cursor:pointer;
+  font-size:18px;color:var(--muted);padding:6px;
+  transition:color .2s;
+}
+.delete-btn:active{color:var(--red)}
+
+/* ── ADD CONTACT PANEL ── */
+.add-panel{
+  background:var(--card);
+  border-top:1px solid var(--border);
+  padding:16px;flex-shrink:0;
+  display:none;
+}
+.add-panel.open{display:block}
+
+.add-row{display:flex;gap:8px;margin-bottom:8px}
+
+.field{
+  flex:1;background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:10px;padding:11px 14px;
+  font-size:15px;font-family:'Heebo',sans-serif;
+  color:var(--text);outline:none;
+  transition:border-color .2s;
+}
+.field:focus{border-color:var(--accent)}
+.field::placeholder{color:var(--muted)}
+.field.ltr{direction:ltr}
+
+.save-btn{
+  width:100%;background:var(--accent);border:none;
+  border-radius:10px;padding:12px;
+  font-size:15px;font-weight:700;color:#0d0d14;
+  cursor:pointer;font-family:'Heebo',sans-serif;
+  transition:opacity .2s;
+}
+.save-btn:active{opacity:.8}
+
+/* ── TOAST ── */
+#toast{
+  position:fixed;bottom:24px;left:50%;
+  transform:translateX(-50%) translateY(100px);
+  background:var(--card);border:1px solid var(--border);
+  border-radius:40px;padding:11px 22px;
+  font-size:14px;font-weight:700;
+  transition:transform .3s cubic-bezier(.34,1.56,.64,1);
+  white-space:nowrap;z-index:999;
+  pointer-events:none;
+}
+#toast.show{transform:translateX(-50%) translateY(0)}
+#toast.ok{border-color:var(--green);color:var(--green)}
+#toast.err{border-color:var(--red);color:var(--red)}
+</style>
+</head>
+<body>
+
+<!-- ═══ MAIN SCREEN ═══ -->
+<div class="screen" id="main">
+
+  <div class="status-bar">
+    <span class="app-name">חייגן קולי</span>
+    <button class="settings-btn" onclick="showContacts()">☰</button>
+  </div>
+
+  <div class="mic-area" id="micArea">
+    <div class="mic-outer" id="micOuter">
+      <div class="ring"></div>
+      <div class="ring"></div>
+      <div class="ring"></div>
+      <button class="mic-btn" id="micBtn" onclick="toggleListen()">
+        <svg class="mic-icon" viewBox="0 0 24 24">
+          <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm-6 9a6 6 0 0 0 12 0h2a8 8 0 0 1-7 7.93V20h3v2H8v-2h3v-2.07A8 8 0 0 1 4 10h2z"/>
+        </svg>
+      </button>
+    </div>
+    <div class="mic-label" id="micLabel">לחץ לדבר</div>
+  </div>
+
+  <div class="heard-box">
+    <div class="heard-dot" id="heardDot"></div>
+    <div class="heard-text" id="heardText">ממתין לפקודה...</div>
+  </div>
+
+</div>
+
+<!-- ═══ MATCH SCREEN ═══ -->
+<div class="screen hidden" id="match" onclick="cancelCall()">
+  <div class="match-avatar" id="matchAvatar">?</div>
+  <div>
+    <div class="match-name" id="matchName">—</div>
+    <div class="match-number" id="matchNumber">—</div>
+  </div>
+  <button class="big-call-btn" id="callBtn" onclick="event.stopPropagation();doCall()">
+    <svg viewBox="0 0 24 24"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
+  </button>
+  <div class="cancel-hint">לחץ על המסך לביטול</div>
+</div>
+
+<!-- ═══ CONTACTS SCREEN ═══ -->
+<div class="screen hidden" id="contacts">
+  <div class="contacts-header">
+    <button class="back-btn" onclick="goMain()">←</button>
+    <span class="contacts-title">אנשי קשר</span>
+    <button class="add-btn-top" onclick="toggleAddPanel()">+ הוסף</button>
+  </div>
+
+  <div class="contacts-scroll" id="contactsList"></div>
+
+  <div class="add-panel" id="addPanel">
+    <div class="add-row">
+      <input class="field" id="fHe" placeholder="שם בעברית (כפי שתאמר)" />
+    </div>
+    <div class="add-row">
+      <input class="field ltr" id="fEn" placeholder="Name in English (optional)" />
+    </div>
+    <div class="add-row">
+      <input class="field ltr" id="fPhone" placeholder="מספר טלפון" type="tel" />
+    </div>
+    <button class="save-btn" onclick="saveContact()">שמור</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+// ── DATA ──────────────────────────────────────────────────
+const KEY = 'vc_contacts_v2';
+let contacts = (() => {
+  try { return JSON.parse(localStorage.getItem(KEY)) || getDefaults(); }
+  catch { return getDefaults(); }
+})();
+
+function getDefaults() {
+  return [
+    { he:'אמא', en:'Ima',   phone:'050-0000001' },
+    { he:'אבא', en:'Aba',   phone:'050-0000002' },
+  ];
+}
+function persist() { localStorage.setItem(KEY, JSON.stringify(contacts)); }
+
+// ── ROUTING ───────────────────────────────────────────────
+let current = 'main';
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s =>
+    s.classList.toggle('hidden', s.id !== id));
+  current = id;
+  if (id === 'contacts') renderContacts();
+}
+function goMain() { stopListen(); show('main'); }
+function showContacts() { show('contacts'); }
+
+// ── CONTACTS UI ───────────────────────────────────────────
+function renderContacts() {
+  const list = document.getElementById('contactsList');
+  list.innerHTML = contacts.length ? '' : '<p style="color:var(--muted);text-align:center;padding:40px 0;font-size:15px">אין אנשי קשר עדיין</p>';
+  contacts.forEach((c, i) => {
+    const el = document.createElement('div');
+    el.className = 'contact-item';
+    el.innerHTML = `
+      <div class="c-avatar">${c.he[0]}</div>
+      <div class="c-info">
+        <div class="c-name">${c.he}</div>
+        ${c.en ? `<div class="c-alias">${c.en}</div>` : ''}
+      </div>
+      <div class="c-num">${c.phone}</div>
+      <button class="delete-btn" onclick="deleteContact(${i},event)">✕</button>
+    `;
+    el.onclick = () => { callContactDirect(i); };
+    list.appendChild(el);
+  });
+}
+
+function toggleAddPanel() {
+  document.getElementById('addPanel').classList.toggle('open');
+}
+
+function saveContact() {
+  const he    = document.getElementById('fHe').value.trim();
+  const en    = document.getElementById('fEn').value.trim();
+  const phone = document.getElementById('fPhone').value.trim();
+  if (!he || !phone) { toast('חסר שם או מספר', 'err'); return; }
+  contacts.push({ he, en, phone });
+  persist();
+  ['fHe','fEn','fPhone'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('addPanel').classList.remove('open');
+  renderContacts();
+  toast('✓ ' + he + ' נוסף', 'ok');
+}
+
+function deleteContact(i, e) {
+  e.stopPropagation();
+  contacts.splice(i, 1);
+  persist();
+  renderContacts();
+}
+
+function callContactDirect(i) {
+  presentMatch(contacts[i]);
+  show('match');
+}
+
+// ── SPEECH ────────────────────────────────────────────────
+let rec = null, listening = false;
+
+function toggleListen() {
+  listening ? stopListen() : startListen();
+}
+
+function startListen() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('הדפדפן לא תומך בזיהוי קולי', 'err'); return; }
+
+  // Beep to signal ready
+  beep(880, 120, .18);
+
+  rec = new SR();
+  rec.lang = 'he-IL';
+  rec.interimResults = true;
+  rec.maxAlternatives = 5;
+  rec.continuous = false;
+
+  rec.onstart = () => {
+    listening = true;
+    setListeningUI(true);
+  };
+
+  rec.onresult = e => {
+    const final = Array.from(e.results).find(r => r.isFinal);
+    if (final) {
+      const texts = Array.from(final).map(a => a.transcript);
+      handleVoice(texts[0], texts);
+    } else {
+      // Interim: show what's being heard
+      const interim = e.results[e.results.length - 1][0].transcript;
+      setHeard(interim, false);
+    }
+  };
+
+  rec.onerror = e => {
+    stopListen();
+    if (e.error !== 'no-speech') toast('שגיאה: ' + e.error, 'err');
+    else beep(330, 200, .1);
+  };
+
+  rec.onend = () => { listening = false; setListeningUI(false); };
+
+  rec.start();
+}
+
+function stopListen() {
+  listening = false;
+  setListeningUI(false);
+  try { rec && rec.abort(); } catch(e){}
+}
+
+function setListeningUI(on) {
+  document.getElementById('micOuter').classList.toggle('listening', on);
+  document.getElementById('micArea').classList.toggle('listening', on);
+  document.getElementById('micLabel').textContent = on ? 'מאזין...' : 'לחץ לדבר';
+  if (!on) {
+    document.getElementById('heardDot').classList.remove('active-dot');
+  } else {
+    document.getElementById('heardDot').classList.add('active-dot');
+  }
+}
+
+function setHeard(txt, final) {
+  const el = document.getElementById('heardText');
+  el.textContent = txt || 'ממתין לפקודה...';
+  el.classList.toggle('active', !!txt);
+}
+
+// ── MATCHING ──────────────────────────────────────────────
+const TRIGGERS  = ['התקשר','חייג','שיחה','צלצל','תחייג','תתקשר','להתקשר','חייגי','התקשרי'];
+const PREPS     = ['ל','אל','עם','ל-','אל-'];
+
+function extractName(raw) {
+  let t = raw.trim();
+  for (const w of TRIGGERS)
+    t = t.replace(new RegExp('^' + w + '\\s*', 'i'), '')
+         .replace(new RegExp('\\s+' + w + '\\s*', 'gi'), ' ');
+  for (const p of PREPS)
+    t = t.replace(new RegExp('^' + p, 'i'), '');
+  return t.trim();
+}
+
+function norm(s) {
+  return s.toLowerCase().replace(/['"״׳\-\s]+/g, '').trim();
+}
+
+function findContact(name, alts) {
+  const n = norm(name);
+  for (const c of contacts)
+    if (norm(c.he) === n || (c.en && norm(c.en) === n)) return c;
+  for (const c of contacts)
+    if (norm(c.he).includes(n) || n.includes(norm(c.he))) return c;
+  for (const c of contacts)
+    if (c.en && (norm(c.en).includes(n) || n.includes(norm(c.en)))) return c;
+  for (const alt of alts || []) {
+    const an = norm(extractName(alt));
+    for (const c of contacts) {
+      if (norm(c.he).includes(an) || an.includes(norm(c.he))) return c;
+      if (c.en && (norm(c.en).includes(an) || an.includes(norm(c.en)))) return c;
+    }
+  }
+  return null;
+}
+
+function handleVoice(text, alts) {
+  setHeard(text, true);
+  stopListen();
+  const name  = extractName(text);
+  const match = findContact(name, alts);
+  if (match) {
+    beep(1320, 80, .15);
+    setTimeout(() => beep(1760, 100, .15), 100);
+    presentMatch(match);
+    show('match');
+    // Announce → then auto-call after speech ends (+ 1s grace to cancel)
+    speak('מתקשר ל' + match.he, () => {
+      startCancelListener();
+      setTimeout(() => {
+        if (current === 'match') doCall();
+      }, 1000);
+    });
+  } else {
+    beep(220, 300, .12);
+    speak('לא מצאתי את ' + name);
+    toast('לא מצאתי: ' + name, 'err');
+  }
+}
+
+// ── MATCH SCREEN ──────────────────────────────────────────
+let pendingPhone = null;
+let cancelRec = null;
+
+function presentMatch(c) {
+  pendingPhone = c.phone;
+  document.getElementById('matchAvatar').textContent = c.he[0] || '?';
+  document.getElementById('matchName').textContent   = c.he;
+  document.getElementById('matchNumber').textContent = c.phone;
+}
+
+function cancelCall() {
+  pendingPhone = null;
+  speechSynthesis.cancel();
+  stopCancelListener();
+  speak('בוטל');
+  goMain();
+}
+
+function startCancelListener() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+  const CANCEL_WORDS = ['ביטול','עצור','לא','בטל','סגור','cancel','stop','no'];
+  cancelRec = new SR();
+  cancelRec.lang = 'he-IL';
+  cancelRec.continuous = true;
+  cancelRec.interimResults = true;
+  cancelRec.onresult = e => {
+    const last = e.results[e.results.length - 1][0].transcript.trim();
+    if (CANCEL_WORDS.some(w => last.includes(w))) cancelCall();
+  };
+  try { cancelRec.start(); } catch(e) {}
+}
+
+function stopCancelListener() {
+  try { cancelRec && cancelRec.abort(); } catch(e) {}
+  cancelRec = null;
+}
+
+function doCall() {
+  if (!pendingPhone) return;
+  stopCancelListener();
+  const clean = pendingPhone.replace(/[^0-9+]/g, '');
+  window.location.href = 'tel:' + clean;
+}
+
+// ── TTS ───────────────────────────────────────────────────
+function speak(text, onDone) {
+  if (!window.speechSynthesis) { onDone && onDone(); return; }
+  speechSynthesis.cancel();
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.lang = 'he-IL';
+  utt.rate = 1.05;
+  utt.pitch = 1.0;
+  utt.volume = 1.0;
+  // Try to find Hebrew voice; fallback to default
+  const voices = speechSynthesis.getVoices();
+  const heVoice = voices.find(v => v.lang.startsWith('he'));
+  if (heVoice) utt.voice = heVoice;
+  utt.onend = () => onDone && onDone();
+  utt.onerror = () => onDone && onDone();
+  speechSynthesis.speak(utt);
+}
+
+// ── AUDIO ─────────────────────────────────────────────────
+let audioCtx = null;
+function getCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function beep(freq, dur, vol) {
+  try {
+    const ctx = getCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = freq;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(vol, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + dur/1000);
+    osc.start(); osc.stop(ctx.currentTime + dur/1000);
+  } catch(e) {}
+}
+
+// ── TOAST ─────────────────────────────────────────────────
+let toastTimer;
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + (type || '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = '', 3000);
+}
+
+// ── SERVICE WORKER ────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+
+// ── AUTO-START ────────────────────────────────────────────
+// If opened from home screen shortcut, auto-start listening
+window.addEventListener('load', () => {
+  const params = new URLSearchParams(location.search);
+  if (params.get('autostart') === '1') {
+    // Small delay to let browser settle
+    setTimeout(startListen, 600);
+  }
+});
+</script>
+</body>
+</html>
