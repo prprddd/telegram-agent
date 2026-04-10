@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python -c \"from bot.main import build_application; print\\('Import OK'\\)\")",
+      "Bash(.venv/Scripts/python -c \"from bot.config import get_settings; s=get_settings\\(\\); print\\('config OK, bot_name:', s.bot_name\\)\")"
+    ]
+  }
+}
