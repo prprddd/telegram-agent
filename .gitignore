@@ -30,6 +30,9 @@ data/logs/
 .idea/
 *.swp
 
+# Nested duplicate project folder
+telegram-agent/
+
 # OS
 .DS_Store
 Thumbs.db

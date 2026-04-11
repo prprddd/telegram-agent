@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from telegram import Update
 from telegram.ext import (
@@ -103,9 +106,29 @@ def build_application() -> Application:
     return app
 
 
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, *args):
+        pass
+
+
+def _start_health_server() -> None:
+    """Start a tiny HTTP server so Render's free Web Service sees an open port."""
+    port = int(os.environ.get("PORT", "10000"))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    logger.info("Health-check server listening on port %d", port)
+
+
 def run() -> None:
     """Run the bot with auto-restart on unexpected failures."""
     setup_logging(get_settings().log_level)
+    _start_health_server()
     backoff = 5
     while True:
         try:
