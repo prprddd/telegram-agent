@@ -15,6 +15,30 @@ from bot.utils.auth import owner_only
 logger = logging.getLogger(__name__)
 
 
+VOICE_REPLY_PREFIXES = (
+    "תדבר איתי",
+    "דבר איתי",
+    "דבר אלי",
+    "תענה בקול",
+    "תענה בהודעה קולית",
+    "תענה לי בקול",
+    "ענה בקול",
+    "הקרא לי",
+    "תקריא לי",
+)
+
+
+def _strip_voice_prefix(text: str) -> tuple[str, bool]:
+    """Return (remaining_text, wants_voice). If a voice-reply prefix matched,
+    strip it and return True."""
+    stripped = text.strip()
+    low = stripped.lower()
+    for prefix in VOICE_REPLY_PREFIXES:
+        if low.startswith(prefix):
+            return stripped[len(prefix):].lstrip(" ,.:;-—"), True
+    return stripped, False
+
+
 @owner_only
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.message
@@ -32,6 +56,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             context.user_data["reply_with_voice"] = True
         try:
             await parse_and_dispatch(update, context, corrected, payload_message=msg)
+        finally:
+            context.user_data.pop("reply_with_voice", None)
+        return
+
+    remaining, wants_voice = _strip_voice_prefix(msg.text)
+    if wants_voice:
+        tts = context.application.bot_data.get("tts")
+        if not tts or not tts.enabled:
+            await msg.reply_text("TTS לא מוגדר (חסר OPENAI_API_KEY). ממשיך בטקסט.")
+        else:
+            context.user_data["reply_with_voice"] = True
+        # Nothing else to do after stripping the prefix → conversational reply
+        payload_text = remaining or "אמור משהו"
+        try:
+            await parse_and_dispatch(update, context, payload_text, payload_message=msg)
         finally:
             context.user_data.pop("reply_with_voice", None)
         return
