@@ -28,9 +28,11 @@ CREATE TABLE IF NOT EXISTS history (
     content_type TEXT NOT NULL,             -- text, photo, document, voice, audio, link
     content_preview TEXT,                   -- short preview / caption / text
     sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    done INTEGER NOT NULL DEFAULT 0,        -- flipped via 👍/❤ reaction from owner
     FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_history_sent_at ON history(sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_history_chat_msg ON history(chat_id, sent_message_id);
 
 CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,6 +84,11 @@ class Database:
     async def init(self) -> None:
         async with aiosqlite.connect(self.path) as db:
             await db.executescript(SCHEMA)
+            # Migration: add `done` column to existing history tables
+            try:
+                await db.execute("ALTER TABLE history ADD COLUMN done INTEGER NOT NULL DEFAULT 0")
+            except aiosqlite.OperationalError:
+                pass  # column already exists
             await db.commit()
 
     def _conn(self) -> aiosqlite.Connection:
@@ -168,6 +175,26 @@ class Database:
                 "SELECT * FROM history ORDER BY sent_at DESC LIMIT ?", (limit,)
             )
             return [dict(r) for r in await cur.fetchall()]
+
+    async def list_open_history_for_group(self, group_id: int, limit: int = 100) -> list[dict[str, Any]]:
+        """Return history rows for a group where done=0 (not marked complete)."""
+        async with self._conn() as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT * FROM history WHERE group_id = ? AND done = 0 ORDER BY sent_at ASC LIMIT ?",
+                (group_id, limit),
+            )
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def mark_history_done(self, chat_id: int, sent_message_id: int, done: bool) -> bool:
+        """Flip the `done` flag on a history row identified by (chat_id, sent_message_id)."""
+        async with self._conn() as db:
+            cur = await db.execute(
+                "UPDATE history SET done = ? WHERE chat_id = ? AND sent_message_id = ?",
+                (1 if done else 0, chat_id, sent_message_id),
+            )
+            await db.commit()
+            return (cur.rowcount or 0) > 0
 
     async def get_last_history(self) -> Optional[dict[str, Any]]:
         async with self._conn() as db:

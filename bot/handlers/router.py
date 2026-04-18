@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -28,6 +29,57 @@ MAX_GROUPS_PER_DAY = 5
 MAX_RECENT_TURNS = 5
 
 logger = logging.getLogger(__name__)
+
+
+# Keyword shortcuts — "משימה: X" / "קנייה X" / "רכישה של Y" bypass the LLM
+# and route directly to the canonically-named group. Each pattern captures the
+# opening verb + optional separator; whatever follows becomes the content.
+CATEGORY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (
+        re.compile(
+            r"^\s*ה?(?:משימה|משימות|משימת)\b\s*[:\-–—,]?\s*",
+            re.UNICODE,
+        ),
+        "משימות",
+    ),
+    (
+        re.compile(
+            r"^\s*ה?(?:קניי?ה|קניות|לקנות|קנה|תקנה|קני|תקני)\b\s*[:\-–—,]?\s*",
+            re.UNICODE,
+        ),
+        "קניות",
+    ),
+    (
+        re.compile(
+            r"^\s*ה?(?:רכישה|רכישות|לרכוש|רכש|תרכוש|רכשי|תרכשי)\b\s*[:\-–—,]?\s*",
+            re.UNICODE,
+        ),
+        "רכישות",
+    ),
+]
+
+
+async def _try_category_shortcut(
+    text: str, db: Database
+) -> Optional[tuple[dict[str, Any], str]]:
+    """If text starts with a category keyword AND the target group exists,
+    return (group_row, remaining_content). Otherwise None."""
+    for pattern, group_name in CATEGORY_PATTERNS:
+        m = pattern.match(text)
+        if not m:
+            continue
+        content = text[m.end():].strip()
+        if not content:
+            # Just the keyword — not enough to send. Fall through to Claude.
+            return None
+        group = await db.get_group_by_name(group_name)
+        if group:
+            return group, content
+        logger.info(
+            "Category keyword matched (%s) but group not registered in DB", group_name
+        )
+        return None
+    return None
 
 
 def _match_groups_locally(text: str, groups: list[dict[str, Any]]) -> list[int]:
@@ -140,6 +192,20 @@ async def parse_and_dispatch(
     tz = pytz.timezone(settings.timezone)
     now = datetime.now(tz)
 
+    # Fast-path: "משימה: X" / "קנייה X" / "רכישה Y" → route directly, skip LLM.
+    shortcut = await _try_category_shortcut(text, db)
+    if shortcut:
+        group, content = shortcut
+        logger.info("Category shortcut → group=%s content=%s", group["name"], content)
+        await _send_to_group(
+            update, context, group["id"], content, payload_message or update.message
+        )
+        # Save turn for conversation memory
+        turns = context.user_data.get("recent_turns", [])
+        turns = turns + [{"user": text, "bot": f"[route_to_group:{group['name']}] {content}"[:200]}]
+        context.user_data["recent_turns"] = turns[-MAX_RECENT_TURNS:]
+        return
+
     groups = await db.list_groups()
     contacts = await db.list_contacts()
     calendars = await db.list_calendars()
@@ -196,6 +262,7 @@ async def parse_and_dispatch(
         "list_contacts": _action_list_contacts,
         "delete_contact": _action_delete_contact,
         "create_telegram_group": _action_create_telegram_group,
+        "list_pending_items": _action_list_pending_items,
         "help": _action_help,
         "unknown": _action_chat,  # treat unknown as chat fallback
     }
@@ -889,6 +956,45 @@ async def _action_help(
         HELP_TEXT.format(bot_name=settings.bot_name),
         parse_mode=ParseMode.MARKDOWN,
     )
+
+
+CATEGORY_ICONS = {"משימות": "📌", "קניות": "🛒", "רכישות": "🛍️"}
+VALID_CATEGORIES = set(CATEGORY_ICONS.keys())
+
+
+async def _action_list_pending_items(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    intent: dict[str, Any],
+    payload_message: Any,
+) -> None:
+    db = _db(context)
+    category = (intent.get("category") or "").strip()
+    if category not in VALID_CATEGORIES:
+        await update.message.reply_text(
+            "איזו קטגוריה? " + " / ".join(VALID_CATEGORIES)
+        )
+        return
+    group = await db.get_group_by_name(category)
+    if not group:
+        await update.message.reply_text(
+            f"קבוצת \"{category}\" לא רשומה אצלי. הוסף אותה עם /addgroup {category} בתוך הקבוצה."
+        )
+        return
+
+    items = await db.list_open_history_for_group(group["id"], limit=100)
+    icon = CATEGORY_ICONS.get(category, "•")
+
+    if not items:
+        await _smart_reply(update, context, f"אין {category} פתוחות. 🎉 יפה!")
+        return
+
+    header = f"*{icon} {category} פתוחות ({len(items)}):*\n_סמן 👍 או ❤ על הודעה בקבוצה כדי לסגור אותה._"
+    await update.message.reply_text(header, parse_mode=ParseMode.MARKDOWN)
+    for item in items:
+        when = (item.get("sent_at") or "")[:16].replace("T", " ")
+        preview = item.get("content_preview") or "[ללא תוכן]"
+        await update.message.reply_text(f"{icon} {when}\n{preview}")
 
 
 async def _action_create_telegram_group(

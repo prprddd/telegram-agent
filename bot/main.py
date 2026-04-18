@@ -14,6 +14,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
+    MessageReactionHandler,
     filters,
 )
 
@@ -22,6 +23,7 @@ from bot.db import Database
 from bot.handlers.commands import cmd_help, cmd_id, cmd_start
 from bot.handlers.groups import cmd_addgroup, cmd_groups, cmd_removegroup
 from bot.handlers.messages import fix_transcription_callback, handle_media, handle_text, handle_voice
+from bot.handlers.reactions import handle_reaction
 from bot.handlers.reminders import restore_reminders
 from bot.handlers.router import create_group_callback, route_callback
 from bot.services.calendar_client import CalendarClient
@@ -101,6 +103,10 @@ def build_application() -> Application:
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_text)
     )
+
+    # Reactions on bot-sent messages in groups (requires the bot to be admin).
+    # Used to flip history.done when owner reacts with 👍 or ❤.
+    app.add_handler(MessageReactionHandler(handle_reaction))
 
     app.add_error_handler(_on_error)
     return app
