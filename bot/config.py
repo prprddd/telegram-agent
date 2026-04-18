@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(None, alias="OPENAI_API_KEY")
     whisper_model: str = Field("whisper-1", alias="WHISPER_MODEL")
     tts_model: str = Field("tts-1", alias="TTS_MODEL")
-    tts_voice: str = Field("nova", alias="TTS_VOICE")
+    tts_voice: str = Field("fable", alias="TTS_VOICE")
 
     # Google Calendar
     google_credentials_file: Path = Field(
