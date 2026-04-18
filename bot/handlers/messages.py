@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import tempfile
 from pathlib import Path
 
@@ -15,28 +16,34 @@ from bot.utils.auth import owner_only
 logger = logging.getLogger(__name__)
 
 
-VOICE_REPLY_PREFIXES = (
-    "תדבר איתי",
-    "דבר איתי",
-    "דבר אלי",
-    "תענה בקול",
-    "תענה בהודעה קולית",
-    "תענה לי בקול",
-    "ענה בקול",
-    "הקרא לי",
-    "תקריא לי",
+VOICE_REQUEST_RE = re.compile(
+    r"^\s*"
+    r"(?:"
+    # Verbs: (optional ת) ענה/גיד/אמור/קרא/קריא + optional "לי"/"לנו" + optional one word
+    r"ת?(?:ענה|עני|גיד|גידי|אמור|קרא|קראי|קריא|קריאי)"
+    r"(?:\s+ל(?:י|נו))?"
+    r"(?:\s+\S+)?\s+(?:בקול|בהודעה\s+קולית|קולית)"
+    # "דבר איתי" / "דברי אלי" etc.
+    r"|ת?דבר[יי]?\s+(?:איתי|אלי|אלינו|איתנו)"
+    # "הקרא לי" / "תקריא לי"
+    r"|ת?הקרא\s+ל(?:י|נו)"
+    r"|ת?קריא\s+ל(?:י|נו)"
+    # Bare "בקול:" as prefix
+    r"|בקול\s*[:\-]"
+    r")"
+    r"\s*[:,\.\-—]*\s*",
+    re.UNICODE,
 )
 
 
 def _strip_voice_prefix(text: str) -> tuple[str, bool]:
-    """Return (remaining_text, wants_voice). If a voice-reply prefix matched,
-    strip it and return True."""
+    """Return (remaining_text, wants_voice). If the user asked for a voice
+    reply via a natural Hebrew phrasing, strip the request and flag True."""
     stripped = text.strip()
-    low = stripped.lower()
-    for prefix in VOICE_REPLY_PREFIXES:
-        if low.startswith(prefix):
-            return stripped[len(prefix):].lstrip(" ,.:;-—"), True
-    return stripped, False
+    m = VOICE_REQUEST_RE.match(stripped)
+    if not m:
+        return stripped, False
+    return stripped[m.end():].strip(" ,.:;-—"), True
 
 
 @owner_only
