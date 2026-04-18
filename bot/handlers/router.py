@@ -1,6 +1,7 @@
 """Central NLU router — interprets free-form messages and dispatches to actions."""
 from __future__ import annotations
 
+import json
 import logging
 import tempfile
 from datetime import datetime, timedelta
@@ -24,8 +25,54 @@ from bot.services.telegram_user_client import TelegramUserClient
 from bot.handlers.commands import HELP_TEXT
 
 MAX_GROUPS_PER_DAY = 5
+MAX_RECENT_TURNS = 5
 
 logger = logging.getLogger(__name__)
+
+
+def _match_groups_locally(text: str, groups: list[dict[str, Any]]) -> list[int]:
+    """Return group IDs whose name or any alias appears as substring in text.
+
+    Deterministic pre-LLM match — fixes inconsistent Claude fuzzy-matching of
+    group names across consecutive messages.
+    """
+    text_low = (text or "").lower()
+    if not text_low.strip():
+        return []
+    matches: list[tuple[int, int]] = []
+    for g in groups:
+        name = (g.get("name") or "").lower().strip()
+        raw_aliases = g.get("aliases") or "[]"
+        try:
+            aliases = json.loads(raw_aliases) if isinstance(raw_aliases, str) else list(raw_aliases)
+        except (ValueError, TypeError):
+            aliases = []
+        candidates = [c for c in [name, *[str(a).lower().strip() for a in aliases]] if c and len(c) >= 2]
+        best = 0
+        for cand in candidates:
+            if cand in text_low:
+                best = max(best, len(cand))
+        if best > 0:
+            matches.append((g["id"], best))
+    if not matches:
+        return []
+    # Prefer the longest match (most specific) — avoids "אלפרד" stealing when "מגדירים את אלפרד" matches
+    matches.sort(key=lambda x: -x[1])
+    top_len = matches[0][1]
+    return [gid for gid, ln in matches if ln == top_len]
+
+
+def _summarize_intent_for_history(intent: dict[str, Any]) -> str:
+    """Short textual summary of what the bot understood/replied, for future turn context."""
+    action = intent.get("action", "unknown")
+    if action in ("chat", "unknown"):
+        return (intent.get("reply") or intent.get("reason") or "")[:200]
+    parts = [f"[{action}]"]
+    for key in ("group_id", "content", "text", "remind_at", "title", "start", "nickname", "email", "name", "range"):
+        val = intent.get(key)
+        if val not in (None, "", []):
+            parts.append(f"{key}={val}")
+    return " ".join(parts)[:200]
 
 
 async def _smart_reply(
@@ -98,6 +145,9 @@ async def parse_and_dispatch(
     calendars = await db.list_calendars()
     recent_events = await db.list_recent_created_events(limit=10)
 
+    local_group_matches = _match_groups_locally(text, groups)
+    recent_turns = context.user_data.get("recent_turns", [])
+
     intent = await claude.parse_intent(
         text=text,
         groups=groups,
@@ -106,8 +156,25 @@ async def parse_and_dispatch(
         recent_events=recent_events,
         now=now,
         timezone=settings.timezone,
+        local_group_matches=local_group_matches,
+        recent_turns=recent_turns,
     )
-    logger.info("Parsed intent: %s", intent)
+    logger.info(
+        "Parsed intent (local_group_matches=%s, recent_turns=%d): %s",
+        local_group_matches, len(recent_turns), intent,
+    )
+
+    # For route_to_group: if local match is unique and Claude didn't resolve, apply it.
+    if intent.get("action") == "route_to_group" and intent.get("group_id") is None:
+        if len(local_group_matches) == 1:
+            intent["group_id"] = local_group_matches[0]
+            intent.pop("group_candidates", None)
+            logger.info("Applied local group match as group_id=%s", intent["group_id"])
+
+    # Save this turn into conversation history (capped)
+    bot_summary = _summarize_intent_for_history(intent)
+    recent_turns = recent_turns + [{"user": text, "bot": bot_summary}]
+    context.user_data["recent_turns"] = recent_turns[-MAX_RECENT_TURNS:]
 
     action = intent.get("action", "unknown")
 
@@ -607,9 +674,6 @@ async def _action_list_events(
     settings = get_settings()
     db = _db(context)
     cal = _calendar(context)
-    if not cal.configured:
-        await update.message.reply_text("Google Calendar לא מוגדר.")
-        return
 
     range_ = intent.get("range", "today")
     tz = pytz.timezone(settings.timezone)
@@ -617,42 +681,67 @@ async def _action_list_events(
     if range_ == "today":
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + timedelta(days=1)
+        label = "היום"
     elif range_ == "tomorrow":
         start = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + timedelta(days=1)
+        label = "מחר"
     else:  # week
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + timedelta(days=7)
+        label = "השבוע"
 
-    calendar_nickname = intent.get("calendar_nickname")
-    if calendar_nickname:
-        cal_row = await db.get_calendar(calendar_nickname)
-        calendar_id = cal_row["google_id"] if cal_row else settings.google_default_calendar
-    else:
-        default = await db.get_default_calendar()
-        calendar_id = default["google_id"] if default else settings.google_default_calendar
+    items: list[tuple[datetime, str]] = []
 
-    try:
-        events = cal.list_events(calendar_id=calendar_id, time_min=start, time_max=end)
-    except Exception as e:
-        await update.message.reply_text(f"שגיאה בקריאת היומן: {e}")
-        return
-
-    if not events:
-        await update.message.reply_text("אין אירועים בטווח המבוקש.")
-        return
-
-    lines = []
-    for ev in events:
-        s = ev.get("start", {}).get("dateTime") or ev.get("start", {}).get("date")
-        title = ev.get("summary", "(ללא כותרת)")
+    # Calendar events (if configured)
+    if cal.configured:
+        calendar_nickname = intent.get("calendar_nickname")
+        if calendar_nickname:
+            cal_row = await db.get_calendar(calendar_nickname)
+            calendar_id = cal_row["google_id"] if cal_row else settings.google_default_calendar
+        else:
+            default = await db.get_default_calendar()
+            calendar_id = default["google_id"] if default else settings.google_default_calendar
         try:
-            dt = datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(tz)
-            when = dt.strftime("%d/%m %H:%M")
+            events = cal.list_events(calendar_id=calendar_id, time_min=start, time_max=end)
+            for ev in events:
+                s = ev.get("start", {}).get("dateTime") or ev.get("start", {}).get("date")
+                title = ev.get("summary", "(ללא כותרת)")
+                try:
+                    dt = datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(tz)
+                except Exception:
+                    continue
+                items.append((dt, f"📅 {dt.strftime('%d/%m %H:%M')} — {title}"))
+        except Exception as e:
+            logger.exception("Failed to list calendar events")
+            await update.message.reply_text(f"שגיאה בקריאת היומן: {e}")
+
+    # Reminders in the same range — always include (the bot owns these)
+    reminders = await db.list_open_reminders()
+    for r in reminders:
+        try:
+            rdt = datetime.fromisoformat(r["remind_at"])
+            if rdt.tzinfo is None:
+                rdt = tz.localize(rdt)
+            else:
+                rdt = rdt.astimezone(tz)
         except Exception:
-            when = s
-        lines.append(f"• {when} — {title}")
-    await _smart_reply(update, context, "\n".join(lines))
+            continue
+        if start <= rdt < end:
+            items.append((rdt, f"⏰ {rdt.strftime('%d/%m %H:%M')} — {r['text']}"))
+
+    if not items:
+        msg = f"אין לך כלום {label}."
+        if not cal.configured:
+            msg += " (Google Calendar לא מוגדר — רואה רק תזכורות שיצרנו פה)"
+        await _smart_reply(update, context, msg)
+        return
+
+    items.sort(key=lambda x: x[0])
+    lines = [f"*{label}:*"] + [ln for _, ln in items]
+    if not cal.configured:
+        lines.append("_רק תזכורות — Google Calendar לא מוגדר._")
+    await _smart_reply(update, context, "\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
 async def _action_summarize_group(

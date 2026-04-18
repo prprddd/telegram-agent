@@ -1,5 +1,7 @@
 <div dir="rtl" lang="he">
 
+⚠️ בסשן חדש - קרא את סעיף 'סטטוס נוכחי' לפני כל פעולה
+
 # הוראות לקלוד — פרויקט telegram-agent
 
 ## מה הפרויקט
@@ -26,95 +28,36 @@
 
 ---
 
-## מצב נוכחי של הקוד (נכון ל-2026-04-10)
+## סטטוס נוכחי - 2026-04-18
 
-### ✅ קיים
+### ✅ מה עובד עכשיו בפועל
 
-**מסמכים:** `README.md`, `docs/spec.md`, `docs/setup.md` — כולם בעברית מלאה.
+- **הבוט חי ומגיב** — `@danous_telegram_agent_bot` (Danou's_Alfred), URL: `https://telegram-agent-1.onrender.com`
+- **UptimeRobot פעיל** — monitor "danou's-telegram-agent" מפנה ל-URL כל 5 דקות. שומר את הבוט ער 24/7 על Render free tier
+- **קבוצה ראשונה מחוברת:** הקבוצה בטלגרם "מגדירים את אלפרד" נרשמה בבוט תחת הכינוי **"אלפרד"**
 
-**קונפיגורציה:** `.env` מלא עם מפתחות אמיתיים (Telegram Bot Token, Owner ID 1707367947, Anthropic, OpenAI). `data/google_credentials.json` קיים. Userbot (API ID/Hash) **ריק עדיין**.
+### ✅ 3 הבאגים מסשן קודם — תוקנו בקוד (ממתין לבדיקה בטלגרם)
 
-**תשתית פרויקט:** `requirements.txt`, `Procfile`, `railway.toml`, `runtime.txt`, `.gitignore`, `.venv/` מותקן.
+1. **זיהוי קבוצה לא עקבי — תוקן.** נוסף מאצ'ר מקומי (Python) ב-`bot/handlers/router.py::_match_groups_locally` שרץ *לפני* ה-LLM, עושה substring match בין טקסט המשתמש לבין `name`/`aliases` של כל קבוצה ב-DB, ומעדיף את ההתאמה הארוכה ביותר (כדי ש"מגדירים את אלפרד" לא תפסיד ל"אלפרד"). התוצאה מוזרקת ל-system prompt כ"זיהוי קבוצה מקומי — סמכותי". בנוסף: אם Claude לא החזיר `group_id` וההתאמה המקומית יחידה — ה-router כופה את ה-ID (`intent["group_id"] = ...`).
 
-**קוד שכתוב ויציב:**
-- `bot/utils/auth.py` — דקורטור `@owner_only`
-- `bot/utils/logging_setup.py` — `setup_logging(level)`
-- `bot/services/transcriber.py` — `Transcriber` class (OpenAI Whisper async)
-- `bot/services/calendar_client.py` — `CalendarClient` class (Google Calendar v3, OAuth desktop flow)
-- `bot/handlers/commands.py` — `cmd_start`, `cmd_help`, `cmd_id`
-- `bot/handlers/groups.py` — `cmd_groups`, `cmd_addgroup`, `cmd_removegroup`
-- `bot/handlers/reminders.py` — `schedule_reminder`, `restore_reminders` (משתמש ב-PTB JobQueue)
-- `userbot/main.py` — תהליך עצמאי, Telethon, סריקה יומית לפי `USERBOT_SCAN_TIME`
+2. **זיכרון שיחה — תוקן.** `context.user_data["recent_turns"]` שומר את 5 הטורים האחרונים (זוגות user/bot). מועבר ל-`parse_intent` דרך פרמטר חדש `recent_turns` ומוצג ב-system prompt בקטע "שיחה אחרונה". יש גם הוראה מפורשת ב-prompt שאם ההודעה היא "כן"/"לא"/"בסדר" — לקרוא את ההודעה האחרונה של הבוט ולהבין המשך. שמירת סיכום טור ב-`_summarize_intent_for_history`.
 
-### ❌ חסר — "המנוע" של הבוט
+3. **"המצאת יכולות" — תוקן.** נוסף ל-system prompt סעיף "⚠️ כנות על מגבלות" שמונה במפורש מה הבוט *לא* יכול (לקרוא היסטוריה בצ'אטים, להעביר את "כל ההודעות", לשלוח מהחשבון האישי, להוסיף קבוצה מבחוץ). כלל חד: "אני לא יכול כי..." *לפני* הצעת חלופה, לא במקום הבקשה.
 
-**שלושת הקבצים האלה הם bottleneck — בלעדיהם שום דבר לא רץ:**
+### 🔜 הצעד הבא
 
-1. **`bot/config.py`** — חייב לחשוף `get_settings()` שמחזיר אובייקט pydantic-settings עם השדות הבאים (מוגדר מהקוד הקיים):
+המשתמש צריך **לבדוק בטלגרם** שה-3 באגים באמת נפתרו:
+- (1) לשלוח שוב "שלח לקבוצה מגדירים את אלפרד: בדיקה" פעמיים ברצף — שתיהן צריכות לעבוד.
+- (2) לענות "כן" לשאלת הבהרה של הבוט — שיתייחס לזה כהמשך הפעולה הקודמת, לא כשיחה חדשה.
+- (3) לשלוח "העבר את כל ההודעות של קבוצה X" — הבוט צריך להגיד "אני לא יכול כי אין לי גישה להיסטוריה" במקום להציע חלופה.
 
-   ```
-   telegram_bot_token: str
-   telegram_owner_id: int
-   anthropic_api_key: str
-   anthropic_model: str
-   openai_api_key: str | None
-   whisper_model: str
-   tts_model: str
-   tts_voice: str
-   google_credentials_file: Path
-   google_token_file: Path
-   google_default_calendar: str
-   telegram_api_id: int | None
-   telegram_api_hash: str | None
-   telethon_session_name: str
-   userbot_other_folder: str
-   userbot_scan_time: str
-   timezone: str
-   database_path: Path
-   log_level: str
-   bot_name: str
-   ```
+אחרי `git push` ל-master → Render יעשה deploy אוטומטי.
 
-   `get_settings()` חייב להיות cached (LRU או lazy) — נקרא בהרבה מקומות.
+### ⚠️ בעיות רקע (לא בוערות)
 
-2. **`bot/db.py`** — `Database` class async (מבוסס `aiosqlite`). חייב לחשוף:
-
-   ```
-   async init()                          # יוצר טבלאות
-   async list_groups() -> list[dict]     # id, name, description, chat_id
-   async add_group(chat_id, name, description) -> int
-   async remove_group(id_or_name) -> bool
-   async list_open_reminders() -> list[dict]  # id, text, remind_at
-   async mark_reminder_fired(id)
-   ```
-
-   טבלאות מינימליות: `groups`, `reminders`, `history` (לוג שליחות), `contacts` (מיפוי כינוי→מייל).
-
-3. **`bot/main.py`** — נקודת כניסה (`python -m bot.main`). צריך:
-   - לקרוא `setup_logging`
-   - ליצור `Database`, לקרוא `db.init()`, לשמור ב-`application.bot_data["db"]`
-   - לרשום את ההנדלרים מ-`commands.py` ו-`groups.py`
-   - לקרוא `restore_reminders(app)` ב-startup
-   - `Application.run_polling()`
-
-### הערות ארכיטקטוניות
-
-- **כל הקוד הקיים מייבא `from bot.config import get_settings`** ו-`from bot.db import Database`. האינטרפייס מוגדר בפועל — שמור עליו.
-- **הבוט ה-"חכם" (LLM router)** — ניתוב בשפה חופשית, חילוץ תזכורות, יצירת אירועי יומן — **עדיין לא נבנה.** זו הפאזה השנייה. הפאזה הראשונה היא בוט בסיסי שעובד עם פקודות בלבד.
-- **הנחת ברירת מחדל למודל Claude:** `claude-sonnet-4-6` (מה שמוגדר ב-`.env`). אם לא זמין — נפל חזרה ל-`claude-sonnet-4-5`.
-
----
-
-## מה עשינו בסשן של 2026-04-10
-
-המשתמש ציין שסשן קודם "נעלם". הסשן הנוכחי היה בעיקר **מיפוי מצב** אחרי איבוד הקונטקסט:
-
-1. אימתתי שהקוד שלם — שום דבר לא נמחק.
-2. זיהיתי את שלושת הקבצים החסרים (`config.py`, `db.py`, `main.py`).
-3. חילצתי את האינטרפייסים שהקוד הקיים כבר מניח עליהם (לעיל).
-4. הצגתי למשתמש שתי אפשרויות להמשך: בוט בסיסי (פקודות בלבד) או בוט חכם מלא (עם LLM router). המשתמש עדיין לא החליט.
-
-**עדיין לא נכתבה שורת קוד חדשה בסשן הזה.**
+- **Userbot**: `TELEGRAM_API_ID`/`HASH` ריקים. המשתמש אמר שלא צריך — הוא יפתח קבוצות בעצמו ויצרף את הבוט ידנית.
+- **OPENAI_API_KEY ב-Render**: לא מוגדר. תמלול קולי ו-TTS לא יעבדו שם. מלא ב-.env המקומי.
+- **Google Calendar ב-Render**: OAuth לא בוצע על Render, `google_token.json` רק מקומית.
 
 ---
 

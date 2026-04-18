@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
-from typing import Any, Optional
+from datetime import datetime, timedelta
+from typing import Any
 
 from anthropic import AsyncAnthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -51,6 +51,8 @@ class ClaudeClient:
         recent_events: list[dict[str, Any]] | None = None,
         now: datetime | None = None,
         timezone: str = "Asia/Jerusalem",
+        local_group_matches: list[int] | None = None,
+        recent_turns: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """Parse free-form Hebrew/English text into a structured intent.
 
@@ -72,10 +74,71 @@ class ClaudeClient:
             for e in (recent_events or [])
         ) or "(אין אירועים אחרונים)"
 
+        if local_group_matches:
+            hint_lines = []
+            for gid in local_group_matches:
+                g = next((x for x in groups if x["id"] == gid), None)
+                if g:
+                    hint_lines.append(f"- id={gid} name=\"{g['name']}\"")
+            group_hint_text = (
+                "⚠️ **זיהוי קבוצה מקומי (קדם-LLM) — סמכותי:** הטקסט של המשתמש מכיל "
+                "בבירור את שם הקבוצה או כינוי שלה. אם פעולה = route_to_group, "
+                f"השתמש ב-group_id הבא (לא לבחור אחר, לא להחזיר candidates):\n" + "\n".join(hint_lines)
+            )
+        elif len(groups) == 1 and any(
+            kw in text.lower() for kw in ("שלח", "תשלח", "תעביר", "לקבוצה", "להעביר", "send", "forward")
+        ):
+            only = groups[0]
+            group_hint_text = (
+                f"⚠️ **רמז מקומי:** יש רק קבוצה אחת במערכת (id={only['id']}, name=\"{only['name']}\"). "
+                "אם הבקשה היא לשליחה לקבוצה — סביר שהכוונה אליה."
+            )
+        else:
+            group_hint_text = "(לא נמצאה התאמה מקומית מקדימה)"
+
+        if recent_turns:
+            turns_text = "\n".join(
+                f"- משתמש: \"{t.get('user', '')}\"\n  בוט: \"{t.get('bot', '')}\""
+                for t in recent_turns[-5:]
+            )
+        else:
+            turns_text = "(זו ההודעה הראשונה בשיחה הנוכחית)"
+
+        if now is None:
+            now = datetime.now()
+        weekday_he = ["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"][now.weekday()]
+        date_table = (
+            f"- היום ({weekday_he}): {now.date().isoformat()}\n"
+            f"- מחר: {(now + timedelta(days=1)).date().isoformat()}\n"
+            f"- מחרתיים: {(now + timedelta(days=2)).date().isoformat()}\n"
+            f"- בעוד שבוע: {(now + timedelta(days=7)).date().isoformat()}"
+        )
+
         system = f"""אתה עוזר אישי חכם ואנרגטי של אדם אחד, פועל דרך טלגרם בעברית ואנגלית.
 שמך הוא "{get_settings().bot_name}". **אתה דובר בלשון זכר תמיד.** הסגנון שלך חיוני ומלא אנרגיה — חיובי, ישיר, מלא מוטיבציה. תשתמש בביטויים מעודדים, תהיה תכל׳סי ולא ארוך, ותדחוף את המשתמש קדימה. תאריך ושעה נוכחיים: {now.isoformat()} (אזור זמן: {timezone}).
 
+═══════════════════════════════════════════
+**📅 טבלת תאריכים (חובה להשתמש — אל תחשב לבד!):**
+═══════════════════════════════════════════
+{date_table}
+
+⚠️ **כלל נוקשה:** כשהמשתמש אומר "מחר", "היום", "מחרתיים", "בעוד שבוע" — השתמש *בדיוק* בתאריך מהטבלה למעלה. אל תחשב בראש שלך. לדוגמה: "תזכורת למחר בשעה 10:05" → remind_at = "{(now + timedelta(days=1)).date().isoformat()}T10:05:00".
+
 ⚠️ חשוב: תהיה זורם וטבעי. אתה מסיק כוונות מתוך מה שנאמר. אל תדרוש פורמט מסוים. אל תחזיר "לא הבנתי" אלא אם אתה באמת מבולבל לחלוטין — במקום זה, פשוט השב בשיחה רגילה.
+
+═══════════════════════════════════════════
+**⚠️ כנות על מגבלות (חובה):**
+═══════════════════════════════════════════
+כשהמשתמש מבקש משהו שאתה לא יכול לעשות — **תגיד ישירות "אני לא יכול כי..." ורק אחר כך הצע חלופה אם יש**. אל תחליף את הבקשה שלו בבקשה שלך. אל תציע משהו אחר כאילו זה מה שהוא ביקש.
+
+מה שאתה **לא** יכול לעשות (הגבלות אמיתיות):
+- **לא יכול לקרוא הודעות שהמשתמש קיבל בטלגרם** (ממשק הבוט לא רואה הודעות נכנסות בצ'אטים פרטיים/קבוצות שהוא לא חבר בהן או שלא מיועדות אליו).
+- **לא יכול לקרוא היסטוריה בקבוצות** שבהן הבוט חבר — רק הודעות ששלחת אתה מהבוט נשמרות בהיסטוריית הבוט.
+- **לא יכול "להעביר את כל ההודעות"** של צ'אט כלשהו — אין לי גישה לגיבוי של צ'אטים.
+- **לא יכול לשלוח הודעה בשמך מחשבונך האישי** (רק מחשבון הבוט).
+- **לא יכול להוסיף קבוצה** לבוט מבחוץ — המשתמש צריך להוסיף את הבוט לקבוצה ולהריץ `/addgroup` שם.
+
+כשמשתמש מבקש אחד מאלה — תגיד את זה בפשטות: "אני לא יכול לעשות X כי Y. אבל אני כן יכול לעזור עם Z אם רלוונטי."
 
 אתה מחזיר JSON תקין בלבד (בלי טקסט מסביב). ה-JSON מתאר מה לעשות. יש שני סוגים של תגובות:
 
@@ -125,6 +188,8 @@ class ClaudeClient:
 קבוצות זמינות:
 {groups_desc}
 
+{group_hint_text}
+
 אנשי קשר:
 {contacts_desc}
 
@@ -133,6 +198,13 @@ class ClaudeClient:
 
 אירועים אחרונים שנוצרו (אפשר לתקן/למחוק אותם):
 {events_desc}
+
+═══════════════════════════════════════════
+**שיחה אחרונה (הקשר — חשוב מאוד!):**
+═══════════════════════════════════════════
+{turns_text}
+
+⚠️ אם הטקסט הנוכחי של המשתמש הוא תגובה קצרה ("כן", "לא", "בסדר", "תודה", "OK", "מאשר", "בטח") — **קרא את ההודעה האחרונה של הבוט** בהיסטוריה למעלה והבן אם זו תגובה לשאלה שלך. אם הבוט שאל "אתה מתכוון ל-X?" והמשתמש ענה "כן" — המשך את הפעולה ההיא, לא תתחיל שיחה חדשה.
 
 ═══════════════════════════════════════════
 **כללי הסקה:**
