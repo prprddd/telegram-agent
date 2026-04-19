@@ -14,16 +14,29 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
-    MessageReactionHandler,
     filters,
 )
+
+# MessageReactionHandler was added in PTB 20.8 but is optional at runtime:
+# if the installed PTB doesn't expose it, we log and skip — the bot should
+# still boot and serve everything else.
+try:
+    from telegram.ext import MessageReactionHandler  # type: ignore
+    from bot.handlers.reactions import handle_reaction
+    _REACTIONS_AVAILABLE = True
+except Exception as _exc:  # noqa: BLE001
+    MessageReactionHandler = None  # type: ignore[assignment]
+    handle_reaction = None  # type: ignore[assignment]
+    _REACTIONS_AVAILABLE = False
+    _REACTIONS_IMPORT_ERROR = _exc
+else:
+    _REACTIONS_IMPORT_ERROR = None
 
 from bot.config import get_settings
 from bot.db import Database
 from bot.handlers.commands import cmd_help, cmd_id, cmd_start
 from bot.handlers.groups import cmd_addgroup, cmd_groups, cmd_removegroup
 from bot.handlers.messages import fix_transcription_callback, handle_media, handle_text, handle_voice
-from bot.handlers.reactions import handle_reaction
 from bot.handlers.reminders import restore_reminders
 from bot.handlers.router import create_group_callback, route_callback
 from bot.services.calendar_client import CalendarClient
@@ -106,7 +119,17 @@ def build_application() -> Application:
 
     # Reactions on bot-sent messages in groups (requires the bot to be admin).
     # Used to flip history.done when owner reacts with 👍 or ❤.
-    app.add_handler(MessageReactionHandler(handle_reaction))
+    if _REACTIONS_AVAILABLE:
+        try:
+            app.add_handler(MessageReactionHandler(handle_reaction))
+            logger.info("MessageReactionHandler registered (👍/❤ tracking active)")
+        except Exception:
+            logger.exception("Failed to register MessageReactionHandler — continuing without reaction tracking")
+    else:
+        logger.warning(
+            "MessageReactionHandler unavailable in installed PTB (%s) — reaction tracking disabled",
+            _REACTIONS_IMPORT_ERROR,
+        )
 
     app.add_error_handler(_on_error)
     return app
